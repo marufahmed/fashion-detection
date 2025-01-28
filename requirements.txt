@@ -1,0 +1,14 @@
+numpy
+scipy
+Pillow
+cython
+matplotlib
+scikit-image
+tensorflow>=2.0,<2.5  # Ensures a compatible TensorFlow version
+keras==2.2.5
+h5py
+imgaug
+protobuf==3.20.*
+aiofiles==0.8.0
+IPython[all]
+
