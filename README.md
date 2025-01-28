@@ -60,6 +60,12 @@ The application runs at:
 http://localhost:8000
 ```
 
+### Swagger UI
+Swagger UI for the app can be found at
+```bash
+http://localhost:8000/docs
+```
+
 ### Endpoints
 
 #### 1. Health Check
