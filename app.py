@@ -27,16 +27,16 @@ app = FastAPI(title="Fashion Detection API")
 
 # Global variables
 MODEL_DIR = os.path.join(ROOT_DIR, "models")
-FASHION_MODEL_PATH = os.path.join(MODEL_DIR, "mask_rcnn_fashion_0008.h5")  # Update with your model path
+FASHION_MODEL_PATH = os.path.join(MODEL_DIR, "mask_rcnn_fashion_0008.h5") 
 UPLOAD_DIR = os.path.join(ROOT_DIR, "uploads")
 OUTPUT_DIR = os.path.join(ROOT_DIR, "outputs")
-IMAGE_SIZE = 512  # Match your training configuration
+IMAGE_SIZE = 512 
 
 # Ensure directories exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Fashion class names - update with your categories
+# Fashion class names
 with open("label_descriptions.json") as f:
     label_descriptions = json.load(f)
 class_names = ['BG'] + [x['name'] for x in label_descriptions['categories']]
@@ -117,7 +117,7 @@ async def health_check() -> Dict[str, str]:
     return {"status": "healthy"}
 
 @app.post("/detect")
-async def detect_fashion(file: UploadFile = File(...)):
+async def detect_items(file: UploadFile = File(...)):
     """
     Endpoint to detect fashion objects in uploaded images.
     Returns both the visualization and detection results.
@@ -166,7 +166,7 @@ async def detect_fashion(file: UploadFile = File(...)):
         
         return {
             'detections': detections,
-            'image_url': f"/output_{file.filename}"
+            'image_url': f"output_{file.filename}"
         }
     
     except Exception as e:
@@ -175,8 +175,118 @@ async def detect_fashion(file: UploadFile = File(...)):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
+# Constants for filtered classes
+SLEEVE_ID = 31
+NECKLINE_ID = 33
+UPPERBODY_IDS = list(range(6))  # IDs 0-5 for upper body garments
 
+def get_category_type(class_name: str, label_descriptions: dict) -> str:
+    """
+    Determine the category type (sleeve, neckline, or torso) based on the class name
+    """
+    # Direct matches for sleeve and neckline
+    if class_name == "sleeve":
+        return "sleeve"
+    elif class_name == "neckline":
+        return "neckline"
+    
+    # Check for torso items by finding the category in label descriptions
+    for category in label_descriptions['categories']:
+        if category['name'] == class_name and category['supercategory'] == "upperbody":
+            return "torso"
+    
+    return "other"
 
+@app.post("/detect-filtered")
+async def detect_filtered_items(file: UploadFile = File(...)):
+    """
+    Endpoint to detect only sleeves, necklines, and upper body garments in uploaded images.
+    Returns both the visualization and filtered detection results.
+    """
+    try:
+        # Save uploaded file
+        file_path = os.path.join(UPLOAD_DIR, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Process image
+        image = resize_image(file_path)
+        
+        # Run detection
+        results = model.detect([image], verbose=1)
+        r = results[0]
+        
+        # Get all detections first
+        detections = []
+        for i in range(len(r['class_ids'])):
+            class_name = class_names[r['class_ids'][i]]
+            category_type = get_category_type(class_name, label_descriptions)
+            
+            if category_type in ["sleeve", "neckline", "torso"]:
+                detections.append({
+                    'category_type': category_type,
+                    'class_name': class_name,
+                    'score': float(r['scores'][i]),
+                    'bbox': r['rois'][i].tolist()
+                })
+        
+        # Group detections by category type
+        grouped_detections = {
+            'sleeve': [],
+            'neckline': [],
+            'torso': []
+        }
+        
+        for detection in detections:
+            category = detection['category_type']
+            if category in grouped_detections:
+                grouped_detections[category].append({
+                    'class': detection['class_name'],
+                    'score': detection['score'],
+                    'bbox': detection['bbox']
+                })
+        
+        # Filter results for visualization
+        filtered_indices = []
+        for i, class_id in enumerate(r['class_ids']):
+            class_name = class_names[class_id]
+            category_type = get_category_type(class_name, label_descriptions)
+            if category_type in ["sleeve", "neckline", "torso"]:
+                filtered_indices.append(i)
+        
+        # Apply filters to all result arrays
+        filtered_rois = r['rois'][filtered_indices]
+        filtered_masks = r['masks'][..., filtered_indices] if r['masks'].size > 0 else r['masks']
+        filtered_class_ids = r['class_ids'][filtered_indices]
+        filtered_scores = r['scores'][filtered_indices]
+        
+        # Create visualization
+        output_path = os.path.join(OUTPUT_DIR, f"filtered_output_{file.filename}")
+        plt.figure(figsize=(16, 16))
+        if len(filtered_indices) > 0:
+            visualize.display_instances(image, filtered_rois, filtered_masks, 
+                                    filtered_class_ids, class_names, 
+                                    filtered_scores)
+        else:
+            plt.imshow(image)
+        plt.savefig(output_path)
+        plt.close()
+        
+        # Clean up uploaded file
+        os.remove(file_path)
+        
+        return {
+            'grouped_detections': grouped_detections,
+            'image_url': f"filtered_output_{file.filename}"
+        }
+    
+    except Exception as e:
+        # Clean up in case of error
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+    
+    
 @app.get("/outputs/{filename}")
 async def get_output(filename: str):
     """Endpoint to retrieve output images"""
