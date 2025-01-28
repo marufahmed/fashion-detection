@@ -23,7 +23,7 @@ from mrcnn import visualize
 from mrcnn.config import Config
 
 # Initialize FastAPI app
-app = FastAPI(title="Fashion Detection API")
+app = FastAPI(title="Fashion Detection API (Technyx Assignment - Maruf)")
 
 # Global variables
 MODEL_DIR = os.path.join(ROOT_DIR, "models")
